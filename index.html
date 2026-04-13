@@ -1,0 +1,806 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>8H mini ADC 监视器</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 20px; }
+      .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin: 12px 0; }
+      button { padding: 6px 10px; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border-bottom: 1px solid #eee; padding: 8px; text-align: left; }
+      .muted { color: #666; }
+      pre { background: #0b0e14; color: #e6edf3; padding: 10px; border-radius: 8px; overflow: auto; }
+      input[type="number"] { width: 110px; padding: 6px 8px; }
+      .triggerWrap { position: relative; width: 520px; height: 18px; border: 1px solid #ddd; border-radius: 999px; overflow: hidden; background: #fafafa; }
+      .triggerFill { position: absolute; left: 0; top: 0; bottom: 0; width: 0%; background: linear-gradient(90deg, #8ab4f8, #34a853); z-index: 1; }
+      .triggerBand { position: absolute; top: 0; bottom: 0; left: 0; width: 0%; opacity: 0.25; pointer-events: none; z-index: 2; }
+      .triggerBand.rtPress { background: #a142f4; }
+      .triggerBand.rtRelease { background: #fbbc04; }
+      .triggerLine { position: absolute; top: -6px; bottom: -6px; width: 2px; background: #111; opacity: 0.55; pointer-events: none; z-index: 3; }
+      .triggerMarker { position: absolute; top: 50%; width: 12px; height: 12px; margin-top: -6px; border-radius: 50%; background: #111; opacity: 0.75; cursor: ew-resize; touch-action: none; z-index: 4; }
+      .triggerMarker.top { background: #d93025; }
+      .triggerMarker.bottom { background: #1a73e8; }
+      .triggerMarker.ap { background: #111; opacity: 0.85; }
+    </style>
+  </head>
+  <body>
+    <h1>8H mini ADC 监视器（配置模式 / WebHID）</h1>
+
+    <div class="card">
+      <div class="row">
+        <button id="btnConnect">连接设备</button>
+        <button id="btnDisconnect" disabled>断开</button>
+        <span id="devInfo" class="muted">未连接</span>
+      </div>
+      <div class="muted" style="margin-top: 8px;">
+        需要 Chrome / Edge，并且以安全上下文打开（建议用 http://localhost）。启动后按住 P3.2 持续 2 秒进入配置模式，再连接。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>实时 ADC</h2>
+      <div class="muted">每 10ms 刷新一次（固件侧节流）。</div>
+      <div class="row" style="margin-top: 10px;">
+        <button id="btnMax" disabled>记录 MAX</button>
+        <button id="btnRefreshCalib" disabled>刷新校准</button>
+        <label class="row" style="gap: 8px;">
+          <input id="chkMin" type="checkbox" disabled />
+          <span>记录 MIN（开启后持续更新最低值，关闭时写入 EEPROM）</span>
+        </label>
+      </div>
+      <table style="margin-top: 10px;">
+        <thead>
+          <tr>
+            <th>通道</th>
+            <th>引脚</th>
+            <th>RAW(u16) / 进度</th>
+          </tr>
+        </thead>
+        <tbody id="adcRows"></tbody>
+      </table>
+      <div class="row" style="margin-top: 10px;">
+        <div>Dig(P3.2)：<span id="digBtn">-</span></div>
+        <div>X：<span id="xAxis">-</span></div>
+        <div>Y：<span id="yAxis">-</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content: space-between; align-items: baseline;">
+        <h2 style="margin: 0;">触发测试（<span id="trigChName">H0</span>）</h2>
+        <label class="row" style="gap: 6px;">
+          <span>通道</span>
+          <select id="selTriggerCh" disabled>
+            <option value="0">H0</option>
+            <option value="1">H1</option>
+            <option value="2">H2</option>
+            <option value="3">H3</option>
+            <option value="4">H4</option>
+            <option value="5">H5</option>
+          </select>
+        </label>
+      </div>
+      <div class="muted">Current_Pos：0~255（基于 EEPROM 的 MAX/MIN 映射 + 上下死区）。</div>
+      <div class="row" style="margin-top: 10px;">
+        <div class="triggerWrap" id="h0TriggerWrap">
+          <div class="triggerFill" id="h0TriggerFill"></div>
+          <div class="triggerBand rtPress" id="h0RtPressBand"></div>
+          <div class="triggerBand rtRelease" id="h0RtReleaseBand"></div>
+          <div class="triggerLine" id="h0ApLine"></div>
+          <div class="triggerMarker top" id="h0TopMarker" title="Top Deadzone"></div>
+          <div class="triggerMarker bottom" id="h0BottomMarker" title="Bottom Deadzone"></div>
+          <div class="triggerMarker ap" id="h0ApMarker" title="AP"></div>
+        </div>
+        <div class="row" style="gap: 10px;">
+          <div>Pos：<span id="h0Pos">-</span></div>
+          <div>状态：<span id="h0State">-</span></div>
+        </div>
+      </div>
+      <div class="row" style="margin-top: 10px;">
+        <div>TopDZ：<span id="h0TopVal">-</span></div>
+        <div>BottomDZ：<span id="h0BottomVal">-</span></div>
+        <label class="row" style="gap: 6px;">
+          <span>AP</span>
+          <input id="inpAp" type="number" min="0" max="255" value="64" disabled />
+        </label>
+        <label class="row" style="gap: 6px;">
+          <span>RT_Press</span>
+          <input id="inpRtPress" type="number" min="0" max="255" value="8" disabled />
+        </label>
+        <label class="row" style="gap: 6px;">
+          <span>RT_Release</span>
+          <input id="inpRtRelease" type="number" min="0" max="255" value="8" disabled />
+        </label>
+        <label class="row" style="gap: 6px;">
+          <span>ENC</span>
+          <input id="inpEncSpeed" type="number" min="-32768" max="32767" step="1" value="8" disabled />
+        </label>
+        <label class="row" style="gap: 6px;">
+          <span>ENC 模式</span>
+          <select id="selEncMode" disabled>
+            <option value="0">手柄轴</option>
+            <option value="1">鼠标横移</option>
+            <option value="2">鼠标纵移</option>
+            <option value="3">鼠标横移反转</option>
+            <option value="4">鼠标纵移反转</option>
+          </select>
+        </label>
+      </div>
+      <div class="row" style="margin-top: 10px;">
+        <button id="btnReadParams" disabled>读取参数</button>
+        <button id="btnWriteParams" disabled>写入参数</button>
+      </div>
+
+      <div style="margin-top: 14px;">
+        <div class="row" style="justify-content: space-between; align-items: baseline;">
+          <div style="font-weight: 600;">键盘功能</div>
+        </div>
+        <div class="muted" style="margin-top: 6px;">每个按键可独立选择输出：未勾选=手柄按键，勾选=键盘键值。键值填写 16 进制，不需要输入 0x（例如 W=1A）。</div>
+        <table style="margin-top: 8px;">
+          <thead>
+            <tr>
+              <th>按键</th>
+              <th>键盘</th>
+              <th>HID 键值</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>H0</td><td><input id="kmM0" type="checkbox" disabled /></td><td><input id="km0" type="text" inputmode="text" placeholder="1A" disabled /></td></tr>
+            <tr><td>H1</td><td><input id="kmM1" type="checkbox" disabled /></td><td><input id="km1" type="text" inputmode="text" placeholder="" disabled /></td></tr>
+            <tr><td>H2</td><td><input id="kmM2" type="checkbox" disabled /></td><td><input id="km2" type="text" inputmode="text" placeholder="" disabled /></td></tr>
+            <tr><td>H3</td><td><input id="kmM3" type="checkbox" disabled /></td><td><input id="km3" type="text" inputmode="text" placeholder="" disabled /></td></tr>
+            <tr><td>H4</td><td><input id="kmM4" type="checkbox" disabled /></td><td><input id="km4" type="text" inputmode="text" placeholder="" disabled /></td></tr>
+            <tr><td>H5</td><td><input id="kmM5" type="checkbox" disabled /></td><td><input id="km5" type="text" inputmode="text" placeholder="" disabled /></td></tr>
+            <tr><td>Dig(P3.2)</td><td><input id="kmM6" type="checkbox" disabled /></td><td><input id="km6" type="text" inputmode="text" placeholder="" disabled /></td></tr>
+            <tr><td>B7</td><td><input id="kmM7" type="checkbox" disabled /></td><td><input id="km7" type="text" inputmode="text" placeholder="" disabled /></td></tr>
+          </tbody>
+        </table>
+        <div class="row" style="margin-top: 10px;">
+          <button id="btnReadKeyCfg" disabled>读取键盘配置</button>
+          <button id="btnWriteKeyCfg" disabled>写入键盘配置</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>日志</h2>
+      <pre id="log"></pre>
+    </div>
+
+    <script>
+      const VID = 0x34bf;
+      const PID = 0xff01;
+      const REPORT_ID = 1;
+      const MAGIC = [0x38, 0x48, 0x43, 0x46];
+      const MSG_ADC = 0x30;
+      const MSG_CALIB = 0x31;
+      const MSG_PARAMS = 0x32;
+      const MSG_KEYCFG = 0x33;
+
+      const CHANNELS = [
+        { name: "H0", pin: "P1.0 (CH0)" },
+        { name: "H1", pin: "P1.1 (CH1)" },
+        { name: "H2", pin: "P5.4 (CH2)" },
+        { name: "H3", pin: "P1.3 (CH3)" },
+        { name: "H4", pin: "P1.4 (CH4)" },
+        { name: "H5", pin: "P1.5 (CH5)" },
+      ];
+
+      const btnConnect = document.getElementById("btnConnect");
+      const btnDisconnect = document.getElementById("btnDisconnect");
+      const btnMax = document.getElementById("btnMax");
+      const btnRefreshCalib = document.getElementById("btnRefreshCalib");
+      const chkMin = document.getElementById("chkMin");
+      const devInfo = document.getElementById("devInfo");
+      const logEl = document.getElementById("log");
+      const adcRows = document.getElementById("adcRows");
+      const digBtnEl = document.getElementById("digBtn");
+      const xAxisEl = document.getElementById("xAxis");
+      const yAxisEl = document.getElementById("yAxis");
+      const trigChNameEl = document.getElementById("trigChName");
+      const selTriggerCh = document.getElementById("selTriggerCh");
+      const h0TriggerWrap = document.getElementById("h0TriggerWrap");
+      const h0TriggerFill = document.getElementById("h0TriggerFill");
+      const h0RtPressBand = document.getElementById("h0RtPressBand");
+      const h0RtReleaseBand = document.getElementById("h0RtReleaseBand");
+      const h0TopMarker = document.getElementById("h0TopMarker");
+      const h0BottomMarker = document.getElementById("h0BottomMarker");
+      const h0ApLine = document.getElementById("h0ApLine");
+      const h0ApMarker = document.getElementById("h0ApMarker");
+      const h0PosEl = document.getElementById("h0Pos");
+      const h0StateEl = document.getElementById("h0State");
+      const h0TopVal = document.getElementById("h0TopVal");
+      const h0BottomVal = document.getElementById("h0BottomVal");
+      const inpAp = document.getElementById("inpAp");
+      const inpRtPress = document.getElementById("inpRtPress");
+      const inpRtRelease = document.getElementById("inpRtRelease");
+      const inpEncSpeed = document.getElementById("inpEncSpeed");
+      const selEncMode = document.getElementById("selEncMode");
+      const btnReadParams = document.getElementById("btnReadParams");
+      const btnWriteParams = document.getElementById("btnWriteParams");
+      const kmModeInputs = [
+        document.getElementById("kmM0"),
+        document.getElementById("kmM1"),
+        document.getElementById("kmM2"),
+        document.getElementById("kmM3"),
+        document.getElementById("kmM4"),
+        document.getElementById("kmM5"),
+        document.getElementById("kmM6"),
+        document.getElementById("kmM7"),
+      ];
+      const kmInputs = [
+        document.getElementById("km0"),
+        document.getElementById("km1"),
+        document.getElementById("km2"),
+        document.getElementById("km3"),
+        document.getElementById("km4"),
+        document.getElementById("km5"),
+        document.getElementById("km6"),
+        document.getElementById("km7"),
+      ];
+      const btnReadKeyCfg = document.getElementById("btnReadKeyCfg");
+      const btnWriteKeyCfg = document.getElementById("btnWriteKeyCfg");
+
+      let device = null;
+      const lastRaw = new Array(CHANNELS.length).fill(null);
+      const calibMax = new Array(CHANNELS.length).fill(null);
+      const calibMin = new Array(CHANNELS.length).fill(null);
+      const trig = {
+        top: 2,
+        bottom: 253,
+        ap: 64,
+        rtPress: 8,
+        rtRelease: 8,
+        hyst: 2,
+        encSpeed: 8,
+        encMode: 0,
+      };
+      const keyCfg = { mode: 0, map: new Array(8).fill(0) };
+      const sim = { st: 0, maxPos: 0, minPos: 255 };
+      let paramsDirty = false;
+      let triggerIdx = 0;
+
+      function log(line) {
+        const t = new Date().toISOString().replace("T", " ").replace("Z", "");
+        logEl.textContent = `[${t}] ${line}\n` + logEl.textContent;
+      }
+
+      function setConnected(connected) {
+        btnDisconnect.disabled = !connected;
+        btnMax.disabled = !connected;
+        btnRefreshCalib.disabled = !connected;
+        chkMin.disabled = !connected;
+        btnReadParams.disabled = !connected;
+        btnWriteParams.disabled = !connected;
+        inpAp.disabled = !connected;
+        inpRtPress.disabled = !connected;
+        inpRtRelease.disabled = !connected;
+        inpEncSpeed.disabled = !connected;
+        selEncMode.disabled = !connected;
+        selTriggerCh.disabled = !connected;
+        btnReadKeyCfg.disabled = !connected;
+        btnWriteKeyCfg.disabled = !connected;
+        for (const el of kmInputs) el.disabled = !connected;
+        for (const el of kmModeInputs) el.disabled = !connected;
+      }
+
+      function initTable() {
+        adcRows.innerHTML = CHANNELS.map((c, i) => {
+          return `<tr>
+            <td>${c.name}</td>
+            <td>${c.pin}</td>
+            <td>
+              <div class="row" style="gap: 10px;">
+                <div style="width: 90px;" id="adc_${i}">-</div>
+                <progress id="bar_${i}" max="4095" value="0" style="width: 240px;"></progress>
+                <progress id="press_${i}" max="1000" value="0" style="width: 240px;"></progress>
+              </div>
+            </td>
+          </tr>`;
+        }).join("");
+      }
+
+      function leU16(lo, hi) {
+        return (lo | (hi << 8)) >>> 0;
+      }
+
+      function isMagicOk(data) {
+        if (data.length < 6) return false;
+        for (let i = 0; i < 4; i++) if (data[i] !== MAGIC[i]) return false;
+        return true;
+      }
+
+      function buildPacket(cmd, payloadBytes) {
+        const buf = new Uint8Array(63);
+        buf.set(MAGIC, 0);
+        buf[4] = cmd & 0xff;
+        const payload = payloadBytes ? Array.from(payloadBytes) : [];
+        buf[5] = payload.length & 0xff;
+        for (let i = 0; i < payload.length && 6 + i < buf.length; i++) {
+          buf[6 + i] = payload[i] & 0xff;
+        }
+        return buf;
+      }
+
+      async function sendCmd(cmd, payloadBytes) {
+        if (!device || !device.opened) throw new Error("未连接设备");
+        const pkt = buildPacket(cmd, payloadBytes);
+        await device.sendReport(REPORT_ID, pkt);
+        log(`TX cmd=0x${cmd.toString(16)}`);
+      }
+
+      function clamp01(x) {
+        if (x < 0) return 0;
+        if (x > 1) return 1;
+        return x;
+      }
+
+      function pressProgress(raw, maxV, minV) {
+        if (raw == null || maxV == null || minV == null) return null;
+        if (maxV === minV) return 0;
+        if (maxV > minV) {
+          return clamp01((maxV - raw) / (maxV - minV));
+        }
+        return clamp01((raw - maxV) / (minV - maxV));
+      }
+
+      function updatePressBar(i) {
+        const bar = document.getElementById(`press_${i}`);
+        if (!bar) return;
+        const p = pressProgress(lastRaw[i], calibMax[i], calibMin[i]);
+        if (p == null) {
+          bar.value = 0;
+          return;
+        }
+        bar.value = Math.round(p * 1000);
+      }
+
+      function clampU8(v) {
+        const n = Number(v);
+        if (!Number.isFinite(n)) return 0;
+        return Math.max(0, Math.min(255, Math.round(n)));
+      }
+
+      function mapRawToPosU8(raw, maxV, minV) {
+        if (raw == null || maxV == null || minV == null) return null;
+        if (maxV === minV) return 0;
+        if (maxV > minV) {
+          if (raw >= maxV) return 0;
+          if (raw <= minV) return 255;
+          return clampU8(((maxV - raw) * 255) / (maxV - minV));
+        }
+        if (raw <= maxV) return 0;
+        if (raw >= minV) return 255;
+        return clampU8(((raw - maxV) * 255) / (minV - maxV));
+      }
+
+      function applyDeadzones(pos) {
+        if (pos == null) return null;
+        if (trig.bottom <= trig.top) return pos;
+        if (pos < trig.top) return 0;
+        if (pos > trig.bottom) return 255;
+        return pos;
+      }
+
+      function ratioFromPos(pos) {
+        if (pos == null) return 0;
+        return Math.max(0, Math.min(1, pos / 255));
+      }
+
+      function setMarkerValue(marker, v) {
+        const r = ratioFromPos(v);
+        marker.style.left = `calc(${(r * 100).toFixed(4)}% - 6px)`;
+      }
+
+      function setLineValue(line, v) {
+        const r = ratioFromPos(v);
+        line.style.left = `calc(${(r * 100).toFixed(4)}% - 1px)`;
+      }
+
+      function setBandValue(band, a, b) {
+        if (!band) return;
+        let start = clampU8(a);
+        let end = clampU8(b);
+        if (end < start) [start, end] = [end, start];
+        if (end === start) {
+          band.style.width = "0%";
+          return;
+        }
+        const left = (start / 255) * 100;
+        const width = ((end - start) / 255) * 100;
+        band.style.left = `${left.toFixed(4)}%`;
+        band.style.width = `${width.toFixed(4)}%`;
+      }
+
+      function syncTriggerUi(pos) {
+        h0TriggerFill.style.width = `${(ratioFromPos(pos) * 100).toFixed(2)}%`;
+        setMarkerValue(h0TopMarker, trig.top);
+        setMarkerValue(h0BottomMarker, trig.bottom);
+        setLineValue(h0ApLine, trig.ap);
+        setMarkerValue(h0ApMarker, trig.ap);
+        h0TopVal.textContent = String(trig.top);
+        h0BottomVal.textContent = String(trig.bottom);
+        if (!paramsDirty &&
+            (document.activeElement !== inpAp) &&
+            (document.activeElement !== inpRtPress) &&
+            (document.activeElement !== inpRtRelease)) {
+          inpAp.value = String(trig.ap);
+          inpRtPress.value = String(trig.rtPress);
+          inpRtRelease.value = String(trig.rtRelease);
+        }
+      }
+
+      function syncParamInputsFromTrig() {
+        inpAp.value = String(trig.ap);
+        inpRtPress.value = String(trig.rtPress);
+        inpRtRelease.value = String(trig.rtRelease);
+        inpEncSpeed.value = String(trig.encSpeed);
+        selEncMode.value = String(trig.encMode);
+      }
+
+      function simUpdate(pos) {
+        const ap = trig.ap;
+        const rtP = trig.rtPress;
+        const rtR = trig.rtRelease;
+        const hy = trig.hyst;
+
+        if (sim.st === 0) {
+          sim.maxPos = pos;
+          sim.minPos = pos;
+          if (pos > ap + hy) {
+            sim.st = 1;
+            sim.maxPos = pos;
+          }
+        } else if (sim.st === 1) {
+          if (pos > sim.maxPos) sim.maxPos = pos;
+          if (sim.maxPos - pos > rtR + hy) {
+            sim.st = 2;
+            sim.minPos = pos;
+          }
+        } else {
+          if (pos < sim.minPos) sim.minPos = pos;
+          if (pos - sim.minPos > rtP + hy) {
+            sim.st = 1;
+            sim.maxPos = pos;
+          } else if (pos <= Math.max(0, ap - hy)) {
+            sim.st = 0;
+          }
+        }
+      }
+
+      function updateH0TriggerFromLatest() {
+        const raw = lastRaw[triggerIdx];
+        const maxV = calibMax[triggerIdx];
+        const minV = calibMin[triggerIdx];
+        const mapped = mapRawToPosU8(raw, maxV, minV);
+        const pos = applyDeadzones(mapped);
+        if (pos == null) {
+          h0PosEl.textContent = "-";
+          h0StateEl.textContent = "-";
+          setBandValue(h0RtPressBand, 0, 0);
+          setBandValue(h0RtReleaseBand, 0, 0);
+          syncTriggerUi(null);
+          return;
+        }
+        simUpdate(pos);
+        h0PosEl.textContent = String(pos);
+        h0StateEl.textContent = sim.st === 1 ? "按下" : "抬起";
+        setBandValue(h0RtPressBand, sim.minPos, Math.min(255, sim.minPos + trig.rtPress + trig.hyst));
+        setBandValue(h0RtReleaseBand, Math.max(0, sim.maxPos - (trig.rtRelease + trig.hyst)), sim.maxPos);
+        syncTriggerUi(pos);
+      }
+
+      function markerDrag(marker, onSet) {
+        let dragging = false;
+        function onDown(e) {
+          dragging = true;
+          marker.setPointerCapture(e.pointerId);
+        }
+        function onMove(e) {
+          if (!dragging) return;
+          const r = h0TriggerWrap.getBoundingClientRect();
+          const x = Math.max(0, Math.min(r.width, e.clientX - r.left));
+          const v = clampU8((x / r.width) * 255);
+          onSet(v);
+          updateH0TriggerFromLatest();
+        }
+        function onUp(e) {
+          dragging = false;
+          try { marker.releasePointerCapture(e.pointerId); } catch {}
+        }
+        marker.addEventListener("pointerdown", onDown);
+        marker.addEventListener("pointermove", onMove);
+        marker.addEventListener("pointerup", onUp);
+        marker.addEventListener("pointercancel", onUp);
+      }
+
+      function handleAdcFrame(data) {
+        if (!isMagicOk(data)) return;
+        const cmd = data[4];
+        if (cmd === (0x40 | 0x80) || cmd === (0x41 | 0x80) || cmd === (0x42 | 0x80) || cmd === (0x43 | 0x80) || cmd === (0x44 | 0x80) || cmd === (0x45 | 0x80) || cmd === (0x46 | 0x80)) {
+          const status = data[5] || 0;
+          log(`RX cmd=0x${cmd.toString(16)} status=${status}`);
+          return;
+        }
+        if (cmd === MSG_CALIB) {
+          const count = data[5] || 0;
+          for (let i = 0; i < Math.min(count, CHANNELS.length); i++) {
+            const offMax = 6 + i * 2;
+            const offMin = 6 + count * 2 + i * 2;
+            if (offMax + 1 >= data.length) break;
+            if (offMin + 1 >= data.length) break;
+            calibMax[i] = leU16(data[offMax], data[offMax + 1]);
+            calibMin[i] = leU16(data[offMin], data[offMin + 1]);
+            updatePressBar(i);
+          }
+          log("已刷新校准数据（MAX/MIN）");
+          return;
+        }
+        if (cmd === MSG_PARAMS) {
+          const len = data[5] || 0;
+          if (len >= 6) {
+            trig.top = clampU8(data[6]);
+            trig.bottom = clampU8(data[7]);
+            trig.ap = clampU8(data[8]);
+            trig.rtPress = clampU8(data[9]);
+            trig.rtRelease = clampU8(data[10]);
+            trig.hyst = clampU8(data[11]);
+            if (len >= 8) {
+              const lo = data[12] & 0xff;
+              const hi = data[13] & 0xff;
+              trig.encSpeed = (hi << 8) | lo;
+              if (trig.encSpeed & 0x8000) trig.encSpeed = trig.encSpeed - 0x10000;
+            }
+            if (len >= 9) {
+              trig.encMode = clampU8(data[14]);
+              if (trig.encMode > 4) trig.encMode = 0;
+            } else {
+              trig.encMode = 0;
+            }
+            if (trig.bottom <= trig.top) trig.bottom = Math.min(255, trig.top + 1);
+            paramsDirty = false;
+            syncParamInputsFromTrig();
+            log("已读取触发参数");
+            updateH0TriggerFromLatest();
+          }
+          return;
+        }
+        if (cmd === MSG_KEYCFG) {
+          const len = data[5] || 0;
+          if (len >= 9) {
+            keyCfg.mode = data[6] & 0xff;
+            for (let i = 0; i < 8; i++) keyCfg.map[i] = data[7 + i] & 0xff;
+            for (let i = 0; i < 8; i++) {
+              const v = keyCfg.map[i];
+              kmInputs[i].value = v ? v.toString(16).toUpperCase().padStart(2, "0") : "";
+              kmModeInputs[i].checked = ((keyCfg.mode >> i) & 1) === 1;
+            }
+            log("已读取键盘配置");
+          }
+          return;
+        }
+        if (cmd !== MSG_ADC) return;
+        const count = data[5] || 0;
+        for (let i = 0; i < Math.min(count, CHANNELS.length); i++) {
+          const off = 6 + i * 2;
+          if (off + 1 >= data.length) break;
+          const v = leU16(data[off], data[off + 1]);
+          lastRaw[i] = v;
+          const cell = document.getElementById(`adc_${i}`);
+          if (cell) cell.textContent = String(v);
+          const bar = document.getElementById(`bar_${i}`);
+          if (bar) bar.value = Math.max(0, Math.min(4095, v));
+          updatePressBar(i);
+        }
+        const x = leU16(data[18], data[19]);
+        const y = leU16(data[20], data[21]);
+        const dig = data[22] ? "按下" : "抬起";
+        xAxisEl.textContent = String(x);
+        yAxisEl.textContent = String(y);
+        digBtnEl.textContent = dig;
+        updateH0TriggerFromLatest();
+      }
+
+      async function disconnectInternal(reason) {
+        try {
+          if (device && device.opened) await device.close();
+        } catch (e) {
+        } finally {
+          device = null;
+          devInfo.textContent = "未连接";
+          setConnected(false);
+          if (reason) log(reason);
+        }
+      }
+
+      async function connectToDevice(dev) {
+        device = dev;
+        await device.open();
+        device.addEventListener("inputreport", (e) => {
+          if (e.reportId !== REPORT_ID) return;
+          const data = new Uint8Array(e.data.buffer);
+          handleAdcFrame(data);
+        });
+        devInfo.textContent = `${device.productName || "HID"} (VID=0x${device.vendorId.toString(16)} PID=0x${device.productId.toString(16)})`;
+        setConnected(true);
+        log("已连接，等待数据…");
+        try {
+          await sendCmd(0x42);
+          await sendCmd(0x44);
+          await sendCmd(0x45);
+        } catch (e) {
+          log(`自动读取配置失败：${e.message || e}`);
+        }
+      }
+
+      btnConnect.addEventListener("click", async () => {
+        try {
+          if (!("hid" in navigator)) throw new Error("当前浏览器不支持 WebHID");
+          const devices = await navigator.hid.requestDevice({ filters: [{ vendorId: VID, productId: PID }] });
+          if (!devices || devices.length === 0) return;
+          await connectToDevice(devices[0]);
+        } catch (e) {
+          log(`连接失败：${e.message || e}`);
+        }
+      });
+
+      btnDisconnect.addEventListener("click", async () => {
+        await disconnectInternal("已断开");
+      });
+
+      btnMax.addEventListener("click", async () => {
+        try {
+          await sendCmd(0x40);
+        } catch (e) {
+          log(`记录 MAX 失败：${e.message || e}`);
+        }
+      });
+
+      btnRefreshCalib.addEventListener("click", async () => {
+        try {
+          await sendCmd(0x42);
+        } catch (e) {
+          log(`刷新校准失败：${e.message || e}`);
+        }
+      });
+
+      btnReadParams.addEventListener("click", async () => {
+        try {
+          await sendCmd(0x44);
+        } catch (e) {
+          log(`读取参数失败：${e.message || e}`);
+        }
+      });
+
+      btnWriteParams.addEventListener("click", async () => {
+        try {
+          trig.ap = clampU8(inpAp.value);
+          trig.rtPress = clampU8(inpRtPress.value);
+          trig.rtRelease = clampU8(inpRtRelease.value);
+          let enc = parseInt(String(inpEncSpeed.value || "0"), 10);
+          if (!Number.isFinite(enc)) enc = 0;
+          enc = Math.max(-32768, Math.min(32767, enc | 0));
+          trig.encSpeed = enc;
+          trig.encMode = clampU8(selEncMode.value);
+          if (trig.encMode > 4) trig.encMode = 0;
+          if (trig.bottom <= trig.top) trig.bottom = Math.min(255, trig.top + 1);
+          const encLo = enc & 0xff;
+          const encHi = (enc >> 8) & 0xff;
+          await sendCmd(0x43, [trig.top, trig.bottom, trig.ap, trig.rtPress, trig.rtRelease, trig.hyst, encLo, encHi, trig.encMode]);
+        } catch (e) {
+          log(`写入参数失败：${e.message || e}`);
+        }
+      });
+
+      function parseHexByte(text) {
+        const s = String(text || "").trim();
+        if (!s) return 0;
+        const v = parseInt(s, 16);
+        if (!Number.isFinite(v)) return 0;
+        return v & 0xff;
+      }
+
+      btnReadKeyCfg.addEventListener("click", async () => {
+        try {
+          await sendCmd(0x45);
+        } catch (e) {
+          log(`读取键盘配置失败：${e.message || e}`);
+        }
+      });
+
+      btnWriteKeyCfg.addEventListener("click", async () => {
+        try {
+          let mask = 0;
+          for (let i = 0; i < 8; i++) {
+            if (kmModeInputs[i].checked) mask |= (1 << i);
+          }
+          const map = kmInputs.map((el) => parseHexByte(el.value));
+          await sendCmd(0x46, [mask & 0xff, ...map]);
+        } catch (e) {
+          log(`写入键盘配置失败：${e.message || e}`);
+        }
+      });
+
+      for (const el of kmInputs) {
+        el.addEventListener("input", () => {
+          const v = parseHexByte(el.value);
+          el.value = v ? v.toString(16).toUpperCase().padStart(2, "0") : "";
+        });
+      }
+
+      for (let i = 0; i < kmModeInputs.length; i++) {
+        kmModeInputs[i].addEventListener("change", () => {
+          if (kmModeInputs[i].checked) keyCfg.mode = keyCfg.mode | (1 << i);
+          else keyCfg.mode = keyCfg.mode & ~(1 << i);
+        });
+      }
+
+      chkMin.addEventListener("change", async () => {
+        try {
+          const enable = chkMin.checked ? 1 : 0;
+          await sendCmd(0x41, [enable]);
+        } catch (e) {
+          log(`记录 MIN 失败：${e.message || e}`);
+        }
+      });
+
+      initTable();
+      markerDrag(h0TopMarker, (v) => {
+        trig.top = v;
+        if (trig.bottom <= trig.top) trig.bottom = Math.min(255, trig.top + 1);
+        paramsDirty = true;
+      });
+      markerDrag(h0BottomMarker, (v) => {
+        trig.bottom = v;
+        if (trig.bottom <= trig.top) trig.top = Math.max(0, trig.bottom - 1);
+        paramsDirty = true;
+      });
+      markerDrag(h0ApMarker, (v) => {
+        trig.ap = v;
+        inpAp.value = String(v);
+        paramsDirty = true;
+      });
+      inpAp.addEventListener("input", () => {
+        trig.ap = clampU8(inpAp.value);
+        paramsDirty = true;
+        updateH0TriggerFromLatest();
+      });
+      inpRtPress.addEventListener("input", () => {
+        trig.rtPress = clampU8(inpRtPress.value);
+        paramsDirty = true;
+        updateH0TriggerFromLatest();
+      });
+      inpRtRelease.addEventListener("input", () => {
+        trig.rtRelease = clampU8(inpRtRelease.value);
+        paramsDirty = true;
+        updateH0TriggerFromLatest();
+      });
+      inpEncSpeed.addEventListener("input", () => {
+        let enc = parseInt(String(inpEncSpeed.value || "0"), 10);
+        if (!Number.isFinite(enc)) enc = 0;
+        enc = Math.max(-32768, Math.min(32767, enc | 0));
+        trig.encSpeed = enc;
+        paramsDirty = true;
+      });
+      selEncMode.addEventListener("change", () => {
+        trig.encMode = clampU8(selEncMode.value);
+        if (trig.encMode > 4) trig.encMode = 0;
+        paramsDirty = true;
+      });
+      selTriggerCh.addEventListener("change", () => {
+        triggerIdx = clampU8(selTriggerCh.value);
+        if (triggerIdx >= CHANNELS.length) triggerIdx = 0;
+        trigChNameEl.textContent = CHANNELS[triggerIdx]?.name || "H0";
+        sim.st = 0;
+        sim.maxPos = 0;
+        sim.minPos = 255;
+        updateH0TriggerFromLatest();
+      });
+      syncTriggerUi(null);
+      log("提示：启动后按住 P3.2 持续 2 秒进入配置模式（VID=0x34BF PID=0xFF01）");
+    </script>
+  </body>
+</html>
