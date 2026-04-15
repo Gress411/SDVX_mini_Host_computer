@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>8H Mini 按钮版配置器</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 20px; background: #121212; color: #e0e0e0; }
+      .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      .card { border: 1px solid #333; border-radius: 12px; padding: 16px; margin: 12px 0; background: #1e1e1e; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+      button { padding: 8px 14px; border-radius: 6px; border: 1px solid #444; background: #2d2d2d; color: #fff; cursor: pointer; transition: all 0.2s; }
+      button:hover:not(:disabled) { background: #3d3d3d; border-color: #555; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border-bottom: 1px solid #333; padding: 12px 8px; text-align: left; }
+      .muted { color: #888; }
+      pre { background: #000; color: #00ff00; padding: 12px; border-radius: 8px; overflow: auto; height: 150px; font-family: 'Consolas', monospace; font-size: 13px; }
+      input[type="number"], input[type="text"] { background: #2d2d2d; border: 1px solid #444; color: #fff; border-radius: 4px; padding: 6px 10px; }
+      .btn-active { color: #ff5252; font-weight: bold; text-shadow: 0 0 8px rgba(255,82,82,0.5); }
+      .kbd-bind-btn { padding: 4px 10px; font-size: 13px; background: #3d3d3d; }
+
+      /* 虚拟键盘样式 - 深度还原参考图 */
+      .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(4px); }
+      .modal-content { background: #1e1e1e; margin: 2% auto; padding: 30px; width: 960px; border-radius: 24px; border: 1px solid #333; position: relative; box-shadow: 0 20px 40px rgba(0,0,0,0.6); }
+      .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
+      .modal-header h3 { margin: 0; font-size: 22px; color: #fff; }
+      .close-btn { font-size: 28px; cursor: pointer; color: #888; transition: color 0.2s; }
+      .close-btn:hover { color: #fff; }
+
+      .kbd-container { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+      .kbd-row { display: flex; gap: 8px; justify-content: center; width: 100%; }
+      .kbd-key { 
+        min-width: 46px; height: 46px; 
+        background: #2d2d2d; border-radius: 8px; 
+        display: flex; align-items: center; justify-content: center; 
+        cursor: pointer; font-size: 13px; color: #ccc; 
+        transition: all 0.1s; border: 1px solid transparent;
+        user-select: none;
+      }
+      .kbd-key:hover { background: #3d3d3d; color: #fff; transform: translateY(-2px); border-color: #555; }
+      .kbd-key:active { background: #222; transform: translateY(0); }
+      
+      /* 特殊键位宽度 */
+      .kbd-key.w-1-5 { min-width: 73px; }
+      .kbd-key.w-1-75 { min-width: 85px; }
+      .kbd-key.w-2 { min-width: 98px; }
+      .kbd-key.w-2-25 { min-width: 110px; }
+      .kbd-key.w-2-75 { min-width: 135px; }
+      .kbd-key.w-6-25 { min-width: 310px; }
+      .kbd-key.spacer { background: transparent; cursor: default; border: none; }
+      .kbd-key.spacer:hover { background: transparent; transform: none; }
+    </style>
+  </head>
+  <body>
+    <h1>8H Mini 按钮版配置器</h1>
+
+    <div class="card">
+      <div class="row">
+        <button id="btnConnect">连接设备</button>
+        <button id="btnDisconnect" disabled>断开</button>
+        <span id="devInfo" class="muted">未连接</span>
+      </div>
+      <div class="muted" style="margin-top: 8px;">
+        请按住 Start 键 (P0.0) 2秒进入配置模式后点击连接。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>实时状态</h2>
+      <div class="row" style="gap: 20px;">
+        <div>按钮状态：<span id="btnStatus">-</span></div>
+        <div>编码器 1：<span id="enc1">-</span></div>
+        <div>编码器 2：<span id="enc2">-</span></div>
+      </div>
+      <div style="margin-top: 15px; display: flex; gap: 12px; flex-wrap: wrap;">
+        <div id="btnInd0" class="card" style="margin: 0; padding: 12px; min-width: 80px; text-align: center;">P00(Start)</div>
+        <div id="btnInd1" class="card" style="margin: 0; padding: 12px; min-width: 80px; text-align: center;">P01</div>
+        <div id="btnInd2" class="card" style="margin: 0; padding: 12px; min-width: 80px; text-align: center;">P02</div>
+        <div id="btnInd3" class="card" style="margin: 0; padding: 12px; min-width: 80px; text-align: center;">P03</div>
+        <div id="btnInd4" class="card" style="margin: 0; padding: 12px; min-width: 80px; text-align: center;">P04</div>
+        <div id="btnInd5" class="card" style="margin: 0; padding: 12px; min-width: 80px; text-align: center;">P05</div>
+        <div id="btnInd6" class="card" style="margin: 0; padding: 12px; min-width: 80px; text-align: center;">P06</div>
+        <div id="btnInd7" class="card" style="margin: 0; padding: 12px; min-width: 80px; text-align: center;">P07</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>编码器配置</h2>
+      <div class="row" style="margin-top: 10px;">
+        <label>
+          编码器速度:
+          <input id="inpEncSpeed" type="number" value="8" disabled />
+        </label>
+        <label>
+          编码器模式:
+          <select id="selEncMode" disabled style="background: #2d2d2d; color: #fff; border: 1px solid #444; padding: 6px; border-radius: 4px;">
+            <option value="0">手柄轴 (Gamepad Axis)</option>
+            <option value="1">鼠标横移 (Mouse X)</option>
+            <option value="2">鼠标纵移 (Mouse Y)</option>
+            <option value="3">鼠标横移反转 (Inv Mouse X)</option>
+            <option value="4">鼠标纵移反转 (Inv Mouse Y)</option>
+          </select>
+        </label>
+      </div>
+      <div class="row" style="margin-top: 15px;">
+        <button id="btnReadParams" disabled>读取参数</button>
+        <button id="btnWriteParams" disabled>保存参数</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>按键映射 (Keyboard Mapping)</h2>
+      <table style="margin-top: 8px;">
+        <thead>
+          <tr>
+            <th>引脚</th>
+            <th>启用键盘</th>
+            <th>HID 键值 (Hex)</th>
+            <th>可视化绑定</th>
+            <th>状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>P0.0 (Start)</td><td><input id="kmM0" type="checkbox" disabled /></td><td><input id="km0" type="text" placeholder="04" disabled style="width: 60px;" /></td><td><button class="kbd-bind-btn" data-idx="0" disabled>绑定</button></td><td id="ks0">-</td></tr>
+          <tr><td>P0.1</td><td><input id="kmM1" type="checkbox" disabled /></td><td><input id="km1" type="text" placeholder="05" disabled style="width: 60px;" /></td><td><button class="kbd-bind-btn" data-idx="1" disabled>绑定</button></td><td id="ks1">-</td></tr>
+          <tr><td>P0.2</td><td><input id="kmM2" type="checkbox" disabled /></td><td><input id="km2" type="text" placeholder="06" disabled style="width: 60px;" /></td><td><button class="kbd-bind-btn" data-idx="2" disabled>绑定</button></td><td id="ks2">-</td></tr>
+          <tr><td>P0.3</td><td><input id="kmM3" type="checkbox" disabled /></td><td><input id="km3" type="text" placeholder="07" disabled style="width: 60px;" /></td><td><button class="kbd-bind-btn" data-idx="3" disabled>绑定</button></td><td id="ks3">-</td></tr>
+          <tr><td>P0.4</td><td><input id="kmM4" type="checkbox" disabled /></td><td><input id="km4" type="text" placeholder="08" disabled style="width: 60px;" /></td><td><button class="kbd-bind-btn" data-idx="4" disabled>绑定</button></td><td id="ks4">-</td></tr>
+          <tr><td>P0.5</td><td><input id="kmM5" type="checkbox" disabled /></td><td><input id="km5" type="text" placeholder="09" disabled style="width: 60px;" /></td><td><button class="kbd-bind-btn" data-idx="5" disabled>绑定</button></td><td id="ks5">-</td></tr>
+          <tr><td>P0.6</td><td><input id="kmM6" type="checkbox" disabled /></td><td><input id="km6" type="text" placeholder="0A" disabled style="width: 60px;" /></td><td><button class="kbd-bind-btn" data-idx="6" disabled>绑定</button></td><td id="ks6">-</td></tr>
+          <tr><td>P0.7</td><td><input id="kmM7" type="checkbox" disabled /></td><td><input id="km7" type="text" placeholder="0B" disabled style="width: 60px;" /></td><td><button class="kbd-bind-btn" data-idx="7" disabled>绑定</button></td><td id="ks7">-</td></tr>
+        </tbody>
+      </table>
+      <div class="row" style="margin-top: 15px;">
+        <button id="btnReadKeyCfg" disabled>读取按键映射</button>
+        <button id="btnWriteKeyCfg" disabled>保存按键映射</button>
+      </div>
+    </div>
+
+    <!-- 虚拟键盘模态框 - 参考图还原 -->
+    <div id="kbdModal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="kbdTitle">配置 H0 按键</h3>
+          <span class="close-btn" onclick="document.getElementById('kbdModal').style.display='none'">&times;</span>
+        </div>
+        <div class="kbd-container" id="kbdContainer">
+          <!-- 动态生成按键行 -->
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>日志</h2>
+      <pre id="log"></pre>
+    </div>
+
+    <script>
+      const VID = 0x34bf;
+      const PID = 0xff01;
+      const REPORT_ID = 1;
+      const MAGIC = [0x38, 0x48, 0x43, 0x46];
+
+      let device = null;
+      let currentBindIdx = -1;
+
+      // 还原参考图的键位布局，包括 F13-F24
+      const KEY_LAYOUT = [
+        [
+          {l:"Esc", v:0x29}, {type:"spacer", w:0.5},
+          {l:"F1", v:0x3A}, {l:"F2", v:0x3B}, {l:"F3", v:0x3C}, {l:"F4", v:0x3D}, {type:"spacer", w:0.5},
+          {l:"F5", v:0x3E}, {l:"F6", v:0x3F}, {l:"F7", v:0x40}, {l:"F8", v:0x41}, {type:"spacer", w:0.5},
+          {l:"F9", v:0x42}, {l:"F10", v:0x43}, {l:"F11", v:0x44}, {l:"F12", v:0x45}, {l:"Prt", v:0x46}
+        ],
+        [
+          {type:"spacer", w:0.5},
+          {l:"F13", v:0x68}, {l:"F14", v:0x69}, {l:"F15", v:0x6A}, {l:"F16", v:0x6B}, {type:"spacer", w:0.5},
+          {l:"F17", v:0x6C}, {l:"F18", v:0x6D}, {l:"F19", v:0x6E}, {l:"F20", v:0x6F}, {type:"spacer", w:0.5},
+          {l:"F21", v:0x70}, {l:"F22", v:0x71}, {l:"F23", v:0x72}, {l:"F24", v:0x73}
+        ],
+        [
+          {l:"~", v:0x35}, {l:"1", v:0x1E}, {l:"2", v:0x1F}, {l:"3", v:0x20}, {l:"4", v:0x21}, {l:"5", v:0x22}, {l:"6", v:0x23}, {l:"7", v:0x24}, {l:"8", v:0x25}, {l:"9", v:0x26}, {l:"0", v:0x27}, {l:"-", v:0x2D}, {l:"=", v:0x2E}, {l:"Backspace", v:0x2A, w:"w-2"}
+        ],
+        [
+          {l:"Tab", v:0x2B, w:"w-1-5"}, {l:"Q", v:0x14}, {l:"W", v:0x1A}, {l:"E", v:0x08}, {l:"R", v:0x15}, {l:"T", v:0x17}, {l:"Y", v:0x1C}, {l:"U", v:0x18}, {l:"I", v:0x0C}, {l:"O", v:0x12}, {l:"P", v:0x13}, {l:"[", v:0x2F}, {l:"]", v:0x30}, {l:"\\", v:0x31}
+        ],
+        [
+          {l:"Caps", v:0x39, w:"w-1-75"}, {l:"A", v:0x04}, {l:"S", v:0x16}, {l:"D", v:0x07}, {l:"F", v:0x09}, {l:"G", v:0x0A}, {l:"H", v:0x0B}, {l:"J", v:0x0D}, {l:"K", v:0x0E}, {l:"L", v:0x0F}, {l:";", v:0x33}, {l:"'", v:0x34}, {l:"Enter", v:0x28, w:"w-2-25"}
+        ],
+        [
+          {l:"LShift", v:0xE1, w:"w-2-25"}, {l:"Z", v:0x1D}, {l:"X", v:0x1B}, {l:"C", v:0x06}, {l:"V", v:0x19}, {l:"B", v:0x05}, {l:"N", v:0x11}, {l:"M", v:0x10}, {l:",", v:0x36}, {l:".", v:0x37}, {l:"/", v:0x38}, {l:"RShift", v:0xE5, w:"w-2-75"}
+        ],
+        [
+          {type:"spacer", w:1},
+          {l:"Ctrl", v:0xE0, w:"w-1-5"}, {l:"Win", v:0xE3, w:"w-1-5"}, {l:"Alt", v:0xE2, w:"w-1-5"}, {l:"Space", v:0x2C, w:"w-6-25"}, {l:"Alt", v:0xE6, w:"w-1-5"}, {l:"Win", v:0xE7, w:"w-1-5"}, {l:"Ctrl", v:0xE4, w:"w-1-5"}
+        ],
+        [
+          {type:"spacer", w:4},
+          {l:"Ins", v:0x49}, {l:"Del", v:0x4C}, {l:"←", v:0x50}, {l:"↑", v:0x52}, {l:"↓", v:0x51}, {l:"→", v:0x4F}
+        ]
+      ];
+
+      function initVirtualKbd() {
+        const container = document.getElementById('kbdContainer');
+        KEY_LAYOUT.forEach(row => {
+          const rowDiv = document.createElement('div');
+          rowDiv.className = 'kbd-row';
+          row.forEach(k => {
+            const keyDiv = document.createElement('div');
+            if (k.type === 'spacer') {
+              keyDiv.className = 'kbd-key spacer';
+              keyDiv.style.minWidth = (k.w * 54) + 'px';
+            } else {
+              keyDiv.className = 'kbd-key' + (k.w ? ' ' + k.w : '');
+              keyDiv.textContent = k.l;
+              keyDiv.onclick = () => {
+                if (currentBindIdx !== -1) {
+                  document.getElementById('km' + currentBindIdx).value = k.v.toString(16).toUpperCase().padStart(2, '0');
+                  document.getElementById('kbdModal').style.display = 'none';
+                }
+              };
+            }
+            rowDiv.appendChild(keyDiv);
+          });
+          container.appendChild(rowDiv);
+        });
+      }
+      initVirtualKbd();
+
+      function log(msg) {
+        const pre = document.getElementById('log');
+        pre.textContent = `[${new Date().toLocaleTimeString()}] ${msg}\n` + pre.textContent;
+      }
+
+      async function sendCmd(cmd, payload = []) {
+        if (!device) return;
+        const data = new Uint8Array(63);
+        data.set(MAGIC, 0);
+        data[4] = cmd;
+        data[5] = payload.length;
+        for (let i = 0; i < payload.length; i++) data[6 + i] = payload[i];
+        await device.sendReport(REPORT_ID, data);
+      }
+
+      document.getElementById('btnConnect').onclick = async () => {
+        try {
+          const devices = await navigator.hid.requestDevice({ filters: [{ vendorId: VID, productId: PID }] });
+          if (devices.length === 0) return;
+          device = devices[0];
+          await device.open();
+          log('设备已连接');
+          document.getElementById('btnConnect').disabled = true;
+          document.getElementById('btnDisconnect').disabled = false;
+          setControlsEnabled(true);
+          
+          device.oninputreport = (e) => {
+            const data = new Uint8Array(e.data.buffer);
+            if (data[0] !== 0x38 || data[1] !== 0x48 || data[2] !== 0x43 || data[3] !== 0x46) return;
+            const cmd = data[4];
+            const len = data[5];
+            
+            if (cmd === 0x30) {
+              const btnBits = data[6];
+              const enc1 = data[7] | (data[8] << 8);
+              const enc2 = data[9] | (data[10] << 8);
+              document.getElementById('enc1').textContent = enc1;
+              document.getElementById('enc2').textContent = enc2;
+              for (let i = 0; i < 8; i++) {
+                const pressed = (btnBits >> i) & 1;
+                const ind = document.getElementById(`btnInd${i}`);
+                const ks = document.getElementById(`ks${i}`);
+                if (pressed) {
+                  ind.classList.add('btn-active');
+                  ks.textContent = 'ON';
+                  ks.classList.add('btn-active');
+                } else {
+                  ind.classList.remove('btn-active');
+                  ks.textContent = '-';
+                  ks.classList.remove('btn-active');
+                }
+              }
+            } else if (cmd === (0x44 | 0x80)) {
+              // Params data at UsbBuffer[7-16] -> data[6-15]
+              const speed = data[12] | (data[13] << 8);
+              document.getElementById('inpEncSpeed').value = speed > 32767 ? speed - 65536 : speed;
+              document.getElementById('selEncMode').value = data[14];
+              log(`参数读取成功: 速度=${document.getElementById('inpEncSpeed').value}, 模式=${data[14]}`);
+            } else if (cmd === (0x45 | 0x80)) {
+              // Keycfg data at UsbBuffer[7-15] -> data[6-14]
+              const mask = data[6];
+              for (let i = 0; i < 8; i++) {
+                document.getElementById(`kmM${i}`).checked = (mask >> i) & 1;
+                document.getElementById(`km${i}`).value = data[7 + i].toString(16).toUpperCase().padStart(2, '0');
+              }
+              log('按键映射读取成功');
+            }
+          };
+          await sendCmd(0x44);
+          await sendCmd(0x45);
+        } catch (err) {
+          log('连接失败: ' + err);
+        }
+      };
+
+      document.getElementById('btnDisconnect').onclick = async () => {
+        if (device) await device.close();
+        device = null;
+        log('设备已断开');
+        document.getElementById('btnConnect').disabled = false;
+        document.getElementById('btnDisconnect').disabled = true;
+        setControlsEnabled(false);
+      };
+
+      function setControlsEnabled(enabled) {
+        const ids = ['inpEncSpeed', 'selEncMode', 'btnReadParams', 'btnWriteParams', 'btnReadKeyCfg', 'btnWriteKeyCfg'];
+        ids.forEach(id => document.getElementById(id).disabled = !enabled);
+        document.querySelectorAll('.kbd-bind-btn').forEach((btn, i) => {
+          btn.disabled = !enabled;
+          document.getElementById(`kmM${i}`).disabled = !enabled;
+          document.getElementById(`km${i}`).disabled = !enabled;
+        });
+      }
+
+      document.querySelectorAll('.kbd-bind-btn').forEach(btn => {
+        btn.onclick = () => {
+          currentBindIdx = btn.dataset.idx;
+          document.getElementById('kbdTitle').textContent = `配置 P0.${currentBindIdx} 按键`;
+          document.getElementById('kbdModal').style.display = 'block';
+        };
+      });
+
+      document.getElementById('btnReadParams').onclick = () => sendCmd(0x44);
+      document.getElementById('btnReadKeyCfg').onclick = () => sendCmd(0x45);
+
+      document.getElementById('btnWriteParams').onclick = async () => {
+        const speed = parseInt(document.getElementById('inpEncSpeed').value);
+        const mode = parseInt(document.getElementById('selEncMode').value);
+        const payload = new Uint8Array(9);
+        payload[6] = speed & 0xff;
+        payload[7] = (speed >> 8) & 0xff;
+        payload[8] = mode;
+        await sendCmd(0x43, Array.from(payload));
+        log('参数已保存');
+      };
+
+      document.getElementById('btnWriteKeyCfg').onclick = async () => {
+        let mask = 0;
+        const keymap = [];
+        for (let i = 0; i < 8; i++) {
+          if (document.getElementById(`kmM${i}`).checked) mask |= (1 << i);
+          keymap.push(parseInt(document.getElementById(`km${i}`).value || '0', 16));
+        }
+        const payload = [mask, ...keymap];
+        await sendCmd(0x46, payload);
+        log('按键映射已保存');
+      };
+
+      window.onclick = (e) => {
+        if (e.target == document.getElementById('kbdModal')) {
+          document.getElementById('kbdModal').style.display = 'none';
+        }
+      }
+    </script>
+  </body>
+</html>
